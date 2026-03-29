@@ -1,6 +1,8 @@
 .section {
   position: relative;
   background: hsl(var(--background));
+  isolation: isolate;
+  z-index: 0;
   --intro-surface: hsl(var(--surface));
   --intro-text: hsl(var(--heading));
   --intro-body: hsl(var(--body));
@@ -15,12 +17,15 @@
 
 .heroViewport {
   position: relative;
+  z-index: 1;
   min-height: max(36rem, 100svh);
   height: max(36rem, 100svh);
   overflow: clip;
   display: flex;
   align-items: flex-end;
   padding: clamp(9rem, 16vh, 12rem) var(--intro-gutter) clamp(2rem, 4.5vh, 3rem);
+  background: hsl(var(--background));
+  isolation: isolate;
 }
 
 .mediaLayer,

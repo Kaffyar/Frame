@@ -95,6 +95,7 @@ const PROJECTS: Project[] = [
 ];
 
 const MARQUEE_TEXT = "ARCHITECTURE   URBAN PLANNING   MASTER PLAN   RESIDENTIAL   PUBLIC SPACE   MIXED-USE   ";
+const STAGE_TRIGGER_GROUP = "voyage-stage-flow";
 
 const ProjectsSection = () => {
   const sectionRef = useRef<HTMLElement>(null);
@@ -194,10 +195,15 @@ const ProjectsSection = () => {
       const flipTl = gsap.timeline({
         scrollTrigger: {
           trigger: sectionRef.current?.querySelector("[data-flip-container]"),
-          start: "top 15%",
+          start: "top top",
           end: `+=${totalProjects * 120}%`,
           pin: true,
+          pinReparent: true,
           scrub: 0.8,
+          anticipatePin: 1,
+          fastScrollEnd: false,
+          preventOverlaps: STAGE_TRIGGER_GROUP,
+          refreshPriority: 10,
           onUpdate: (self) => {
             const nextIndex = Math.min(Math.floor(self.progress * totalProjects), totalProjects - 1);
             if (nextIndex !== activeIndexRef.current) {
@@ -243,7 +249,7 @@ const ProjectsSection = () => {
   const project = PROJECTS[activeIndex];
 
   return (
-    <section id="projects" ref={sectionRef} className="relative overflow-hidden bg-background">
+    <section id="projects" ref={sectionRef} className="relative isolate overflow-hidden bg-background">
       <div className="px-6 pt-32 sm:px-10 sm:pt-40 lg:px-16">
         <div className="mx-auto max-w-screen-xl">
           <span
@@ -289,7 +295,7 @@ const ProjectsSection = () => {
 
       <div
         data-flip-container
-        className="relative flex min-h-screen items-center justify-center px-6 sm:px-10 lg:px-16"
+        className="relative z-10 flex min-h-screen items-center justify-center bg-background px-6 sm:px-10 lg:px-16"
       >
         <div
           ref={glowRef}

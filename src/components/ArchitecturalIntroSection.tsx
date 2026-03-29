@@ -43,6 +43,7 @@ const VIDEO_TIME_EPSILON = 1 / 240;
 const INITIAL_HIGH_PRIORITY_FRAMES = 6;
 const PRIORITY_NEIGHBORHOOD_RADIUS = 4;
 const MAX_CONCURRENT_LOADS = 3;
+const STAGE_TRIGGER_GROUP = "voyage-stage-flow";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -348,9 +349,12 @@ export default function ArchitecturalIntroSection({
                 end: () => `+=${scrollDistance}`,
                 pin: heroViewportEl,
                 pinSpacing: true,
+                pinReparent: true,
                 scrub: scrubAmount,
                 anticipatePin: 1,
-                fastScrollEnd: true,
+                fastScrollEnd: false,
+                preventOverlaps: STAGE_TRIGGER_GROUP,
+                refreshPriority: 30,
                 invalidateOnRefresh: true,
                 onUpdate: (self) => {
                   lastProgress = self.progress;
@@ -721,9 +725,12 @@ export default function ArchitecturalIntroSection({
               end: () => `+=${scrollDistance}`,
               pin: heroViewportEl,
               pinSpacing: true,
+              pinReparent: true,
               scrub: scrubAmount,
               anticipatePin: 1,
-              fastScrollEnd: true,
+              fastScrollEnd: false,
+              preventOverlaps: STAGE_TRIGGER_GROUP,
+              refreshPriority: 30,
               invalidateOnRefresh: true,
               onUpdate: (self) => {
                 scheduleFrame(self.progress * (LUX_SEQUENCE_FRAME_COUNT - 1));

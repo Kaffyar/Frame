@@ -1,11 +1,14 @@
 .section {
   position: relative;
+  isolation: isolate;
+  z-index: 0;
   background: transparent;
   color: hsl(var(--heading));
 }
 
 .pin {
   position: relative;
+  z-index: 1;
   min-height: max(34rem, 100svh);
   height: max(34rem, 100svh);
   overflow: clip;

@@ -62,6 +62,7 @@ const INITIAL_HIGH_PRIORITY_FRAMES = 14;
 const PRIORITY_NEIGHBORHOOD_RADIUS = 12;
 const MAX_CONCURRENT_LOADS = 3;
 const SEQUENCE_START_ROOT_MARGIN = "140% 0px";
+const STAGE_TRIGGER_GROUP = "voyage-stage-flow";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -364,9 +365,12 @@ export default function CinematicJourneySection({
                 end: () => `+=${scrollDistance}`,
                 pin: pinEl,
                 pinSpacing: true,
+                pinReparent: true,
                 scrub: scrubAmount,
                 anticipatePin: 1,
-                fastScrollEnd: true,
+                fastScrollEnd: false,
+                preventOverlaps: STAGE_TRIGGER_GROUP,
+                refreshPriority: 20,
                 invalidateOnRefresh: true,
                 onUpdate: (self) => {
                   lastProgress = self.progress;
@@ -778,9 +782,12 @@ export default function CinematicJourneySection({
               end: () => `+=${scrollDistance}`,
               pin: pinEl,
               pinSpacing: true,
+              pinReparent: true,
               scrub: scrubAmount,
               anticipatePin: 1,
-              fastScrollEnd: true,
+              fastScrollEnd: false,
+              preventOverlaps: STAGE_TRIGGER_GROUP,
+              refreshPriority: 20,
               invalidateOnRefresh: true,
               onUpdate: (self) => {
                 setDesiredFrame(self.progress * (sequenceFrameCount - 1));

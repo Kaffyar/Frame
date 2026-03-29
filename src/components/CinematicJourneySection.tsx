@@ -3,11 +3,9 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
   clamp,
-  getWarmedMediaSource,
   isMobileLikeViewport,
   shouldUseHighQualityDesktopVideo,
   shouldUseLiteMedia,
-  warmMediaSource,
 } from "@/lib/mediaPlayback";
 import usePrefersReducedMotion from "@/hooks/usePrefersReducedMotion";
 import styles from "./CinematicJourneySection.module.css";
@@ -127,7 +125,6 @@ export default function CinematicJourneySection({
   const lastDrawnFrameRef = useRef(-1);
   const sequenceReadyRef = useRef(false);
   const sequenceStartedRef = useRef(false);
-  const warmedVideoSrcRef = useRef<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
   const useLiteMedia = shouldUseLiteMedia(MOBILE_BREAKPOINT);
@@ -170,13 +167,12 @@ export default function CinematicJourneySection({
     let renderRafId: number | null = null;
     let resizeTimeoutId: number | null = null;
     let loadingObserver: IntersectionObserver | null = null;
-    let warmupAbortController: AbortController | null = null;
-    let warmupTimeoutId: number | null = null;
-    let warmupIdleHandle: number | null = null;
+    let preloadTimeoutId: number | null = null;
+    let preloadIdleHandle: number | null = null;
+    let preloadStarted = false;
+    let interactionListenersAttached = false;
     let activeLoads = 0;
     let frameLerpFactor = DESKTOP_FRAME_LERP;
-
-    warmedVideoSrcRef.current = desktopVideoSrc ? getWarmedMediaSource(desktopVideoSrc) : null;
 
     if (useVideoMedia) {
       if (!videoEl) {
@@ -194,16 +190,44 @@ export default function CinematicJourneySection({
           cancelIdleCallback?: (handle: number) => void;
         };
 
-      const clearWarmupSchedule = () => {
-        if (warmupTimeoutId !== null) {
-          window.clearTimeout(warmupTimeoutId);
-          warmupTimeoutId = null;
+      const clearPreloadSchedule = () => {
+        if (preloadTimeoutId !== null) {
+          window.clearTimeout(preloadTimeoutId);
+          preloadTimeoutId = null;
         }
 
-        if (warmupIdleHandle !== null && typeof browserWindow.cancelIdleCallback === "function") {
-          browserWindow.cancelIdleCallback(warmupIdleHandle);
-          warmupIdleHandle = null;
+        if (preloadIdleHandle !== null && typeof browserWindow.cancelIdleCallback === "function") {
+          browserWindow.cancelIdleCallback(preloadIdleHandle);
+          preloadIdleHandle = null;
         }
+      };
+
+      const handleInteractionPreload = () => {
+        startBackgroundPreload();
+      };
+
+      const detachInteractionListeners = () => {
+        if (!interactionListenersAttached) {
+          return;
+        }
+
+        interactionListenersAttached = false;
+        window.removeEventListener("wheel", handleInteractionPreload);
+        window.removeEventListener("touchstart", handleInteractionPreload);
+        window.removeEventListener("pointerdown", handleInteractionPreload);
+        window.removeEventListener("keydown", handleInteractionPreload);
+      };
+
+      const attachInteractionListeners = () => {
+        if (interactionListenersAttached) {
+          return;
+        }
+
+        interactionListenersAttached = true;
+        window.addEventListener("wheel", handleInteractionPreload, { passive: true });
+        window.addEventListener("touchstart", handleInteractionPreload, { passive: true });
+        window.addEventListener("pointerdown", handleInteractionPreload, { passive: true });
+        window.addEventListener("keydown", handleInteractionPreload, { passive: true });
       };
 
       const stopVideoSyncLoop = () => {
@@ -285,42 +309,31 @@ export default function CinematicJourneySection({
       };
 
       const attachVideoSource = () => {
-        const resolvedVideoSrc = warmedVideoSrcRef.current ?? desktopVideoSrc;
-
-        if (!resolvedVideoSrc) {
+        if (!desktopVideoSrc) {
           return;
         }
 
-        if (videoEl.getAttribute("src") === resolvedVideoSrc) {
+        if (videoEl.getAttribute("src") === desktopVideoSrc) {
           return;
         }
 
-        videoEl.src = resolvedVideoSrc;
+        videoEl.src = desktopVideoSrc;
       };
 
-      const startBackgroundWarmup = () => {
-        if (!desktopVideoSrc || disposed || isLocalPreview || warmedVideoSrcRef.current) {
+      const startBackgroundPreload = () => {
+        if (!desktopVideoSrc || disposed || preloadStarted) {
           return;
         }
 
-        warmupAbortController?.abort();
-        warmupAbortController = new AbortController();
+        preloadStarted = true;
+        clearPreloadSchedule();
+        detachInteractionListeners();
+        attachVideoSource();
+        videoEl.preload = "auto";
 
-        void warmMediaSource(desktopVideoSrc, warmupAbortController.signal)
-          .then((warmedSource) => {
-            if (disposed) {
-              return;
-            }
-
-            warmedVideoSrcRef.current = warmedSource;
-          })
-          .catch(() => {
-            if (disposed) {
-              return;
-            }
-
-            warmedVideoSrcRef.current = getWarmedMediaSource(desktopVideoSrc);
-          });
+        if (videoEl.readyState < 2) {
+          videoEl.load();
+        }
       };
 
       const setInitialTextState = () => {
@@ -395,9 +408,7 @@ export default function CinematicJourneySection({
               return;
             }
 
-            attachVideoSource();
-            videoEl.preload = "auto";
-            videoEl.load();
+            startBackgroundPreload();
             loadingObserver?.disconnect();
             loadingObserver = null;
           },
@@ -411,26 +422,28 @@ export default function CinematicJourneySection({
         loadingObserver.observe(sectionEl);
       };
 
-      const scheduleBackgroundWarmup = () => {
-        if (prefersReducedMotion || !desktopVideoSrc || isLocalPreview) {
+      const scheduleBackgroundPreload = () => {
+        if (prefersReducedMotion || !desktopVideoSrc) {
           return;
         }
 
-        const beginWarmup = () => {
-          clearWarmupSchedule();
-          startBackgroundWarmup();
+        const beginPreload = () => {
+          clearPreloadSchedule();
+          startBackgroundPreload();
         };
 
+        attachInteractionListeners();
+
         if (typeof browserWindow.requestIdleCallback === "function") {
-          warmupIdleHandle = browserWindow.requestIdleCallback(() => {
-            beginWarmup();
-          }, { timeout: 1200 });
+          preloadIdleHandle = browserWindow.requestIdleCallback(() => {
+            beginPreload();
+          }, { timeout: 600 });
           return;
         }
 
-        warmupTimeoutId = window.setTimeout(() => {
-          beginWarmup();
-        }, 600);
+        preloadTimeoutId = window.setTimeout(() => {
+          beginPreload();
+        }, 350);
       };
 
       videoEl.pause();
@@ -449,7 +462,7 @@ export default function CinematicJourneySection({
 
       window.addEventListener("resize", handleResize, { passive: true });
       buildTimeline();
-      scheduleBackgroundWarmup();
+      scheduleBackgroundPreload();
       startVideoLoadingWhenNearViewport();
 
       return () => {
@@ -461,8 +474,8 @@ export default function CinematicJourneySection({
           window.clearTimeout(resizeTimeoutId);
         }
 
-        clearWarmupSchedule();
-        warmupAbortController?.abort();
+        clearPreloadSchedule();
+        detachInteractionListeners();
         stopVideoSyncLoop();
         loadingObserver?.disconnect();
         videoEl.removeEventListener("loadedmetadata", handleVideoMetadata);

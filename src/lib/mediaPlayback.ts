@@ -2,9 +2,6 @@ export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-const warmedMediaUrlCache = new Map<string, string>();
-const warmedMediaPromiseCache = new Map<string, Promise<string>>();
-
 export function isMobileLikeViewport(maxWidth: number): boolean {
   return (
     window.matchMedia("(pointer: coarse)").matches ||
@@ -103,53 +100,4 @@ export function shouldUseHighQualityDesktopVideo(maxWidth: number): boolean {
   const strongMemory = deviceMemory === null || deviceMemory >= 8;
 
   return strongConnection && strongMemory;
-}
-
-export function getWarmedMediaSource(src: string): string | null {
-  return warmedMediaUrlCache.get(src) ?? null;
-}
-
-export async function warmMediaSource(
-  src: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  if (typeof window === "undefined") {
-    return src;
-  }
-
-  const cachedSource = warmedMediaUrlCache.get(src);
-  if (cachedSource) {
-    return cachedSource;
-  }
-
-  const pendingSource = warmedMediaPromiseCache.get(src);
-  if (pendingSource) {
-    return pendingSource;
-  }
-
-  const warmingPromise = fetch(src, {
-    cache: "force-cache",
-    credentials: "same-origin",
-    signal,
-  })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error(`Failed to warm media source: ${response.status}`);
-      }
-
-      return response.blob();
-    })
-    .then((blob) => {
-      const objectUrl = URL.createObjectURL(blob);
-      warmedMediaUrlCache.set(src, objectUrl);
-      warmedMediaPromiseCache.delete(src);
-      return objectUrl;
-    })
-    .catch((error) => {
-      warmedMediaPromiseCache.delete(src);
-      throw error;
-    });
-
-  warmedMediaPromiseCache.set(src, warmingPromise);
-  return warmingPromise;
 }

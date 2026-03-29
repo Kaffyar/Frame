@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { clamp, isMobileLikeViewport, shouldUseLiteMedia } from "@/lib/mediaPlayback";
+import {
+  clamp,
+  isMobileLikeViewport,
+  shouldUseHighQualityDesktopVideo,
+  shouldUseLiteMedia,
+} from "@/lib/mediaPlayback";
 import usePrefersReducedMotion from "@/hooks/usePrefersReducedMotion";
 import styles from "./ArchitecturalIntroSection.module.css";
 
@@ -21,7 +26,8 @@ interface ArchitecturalIntroSectionProps {
 
 const LUX_POSTER_SRC = "/videos/luxury-black-house-poster-premium.jpg";
 const LUX_MOBILE_POSTER_SRC = "/videos/luxury-black-house-poster-mobile.webp";
-const LUX_DESKTOP_VIDEO_SRC = "/videos/luxury-black-house-sequence-desktop.mp4";
+const LUX_DESKTOP_VIDEO_STREAM_SRC = "/videos/luxury-black-house-sequence-desktop-stream-v1.mp4";
+const LUX_DESKTOP_VIDEO_HQ_SRC = "/videos/luxury-black-house-sequence-desktop.mp4";
 const LUX_SEQUENCE_FRAME_COUNT = 477;
 const LUX_SEQUENCE_BASE_PATH = "/videos/luxury-black-house-sequence-60fps-v2";
 const LUX_SEQUENCE_MOBILE_BASE_PATH = "/videos/luxury-black-house-sequence-60fps-mobile";
@@ -107,6 +113,11 @@ export default function ArchitecturalIntroSection({
   const prefersReducedMotion = usePrefersReducedMotion();
   const useLiteMedia = shouldUseLiteMedia(MOBILE_BREAKPOINT);
   const useVideoMedia = !useLiteMedia && !prefersReducedMotion;
+  const desktopVideoSrc = useVideoMedia
+    ? shouldUseHighQualityDesktopVideo(MOBILE_BREAKPOINT)
+      ? LUX_DESKTOP_VIDEO_HQ_SRC
+      : LUX_DESKTOP_VIDEO_STREAM_SRC
+    : null;
   const posterSrc = useLiteMedia ? LUX_MOBILE_POSTER_SRC : LUX_POSTER_SRC;
   const [isSequenceReady, setIsSequenceReady] = useState(false);
   const manifestoSentence = `${manifesto.split(". ")[0]?.replace(/\.$/, "")}.`;
@@ -145,8 +156,17 @@ export default function ArchitecturalIntroSection({
     let gsapContext: gsap.Context | null = null;
     let renderRafId: number | null = null;
     let resizeTimeoutId: number | null = null;
+    let loadingObserver: IntersectionObserver | null = null;
+    let idleLoadTimeoutId: number | null = null;
+    let idleLoadHandle: number | null = null;
+    let interactionListenersAttached = false;
     let activeLoads = 0;
     let frameLerpFactor = DESKTOP_FRAME_LERP;
+    const browserWindow = window as Window &
+      typeof globalThis & {
+        requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+        cancelIdleCallback?: (handle: number) => void;
+      };
     const sequenceBasePath = useLiteMedia ? LUX_SEQUENCE_MOBILE_BASE_PATH : LUX_SEQUENCE_BASE_PATH;
 
     if (useVideoMedia) {
@@ -159,6 +179,72 @@ export default function ArchitecturalIntroSection({
       let targetVideoTime = 0;
       let renderedVideoTime = 0;
       let videoSyncRafId: number | null = null;
+
+      const clearIdleLoad = () => {
+        if (idleLoadTimeoutId !== null) {
+          window.clearTimeout(idleLoadTimeoutId);
+          idleLoadTimeoutId = null;
+        }
+
+        if (idleLoadHandle !== null && typeof browserWindow.cancelIdleCallback === "function") {
+          browserWindow.cancelIdleCallback(idleLoadHandle);
+          idleLoadHandle = null;
+        }
+      };
+
+      const handleInteractionLoad = () => {
+        startVideoLoading();
+      };
+
+      const detachInteractionListeners = () => {
+        if (!interactionListenersAttached) {
+          return;
+        }
+
+        interactionListenersAttached = false;
+        window.removeEventListener("wheel", handleInteractionLoad);
+        window.removeEventListener("touchstart", handleInteractionLoad);
+        window.removeEventListener("pointerdown", handleInteractionLoad);
+        window.removeEventListener("keydown", handleInteractionLoad);
+      };
+
+      const attachInteractionListeners = () => {
+        if (interactionListenersAttached) {
+          return;
+        }
+
+        interactionListenersAttached = true;
+        window.addEventListener("wheel", handleInteractionLoad, { passive: true });
+        window.addEventListener("touchstart", handleInteractionLoad, { passive: true });
+        window.addEventListener("pointerdown", handleInteractionLoad, { passive: true });
+        window.addEventListener("keydown", handleInteractionLoad, { passive: true });
+      };
+
+      const attachVideoSource = () => {
+        if (!desktopVideoSrc) {
+          return;
+        }
+
+        if (videoEl.getAttribute("src") === desktopVideoSrc) {
+          return;
+        }
+
+        videoEl.src = desktopVideoSrc;
+      };
+
+      const startVideoLoading = () => {
+        if (disposed) {
+          return;
+        }
+
+        clearIdleLoad();
+        detachInteractionListeners();
+        loadingObserver?.disconnect();
+        loadingObserver = null;
+        attachVideoSource();
+        videoEl.preload = "auto";
+        videoEl.load();
+      };
 
       const stopVideoSyncLoop = () => {
         if (videoSyncRafId !== null) {
@@ -295,9 +381,45 @@ export default function ArchitecturalIntroSection({
         }, 120);
       };
 
+      const startVideoLoadingWhenReady = () => {
+        if (prefersReducedMotion) {
+          return;
+        }
+
+        attachInteractionListeners();
+
+        loadingObserver = new IntersectionObserver(
+          (entries) => {
+            const [entry] = entries;
+            if (!entry?.isIntersecting) {
+              return;
+            }
+
+            startVideoLoading();
+          },
+          {
+            root: null,
+            rootMargin: "20% 0px",
+            threshold: 0,
+          },
+        );
+
+        loadingObserver.observe(sectionEl);
+
+        if (typeof browserWindow.requestIdleCallback === "function") {
+          idleLoadHandle = browserWindow.requestIdleCallback(() => {
+            startVideoLoading();
+          }, { timeout: 1200 });
+        } else {
+          idleLoadTimeoutId = browserWindow.setTimeout(() => {
+            startVideoLoading();
+          }, 220);
+        }
+      };
+
       videoEl.pause();
-      videoEl.preload = "auto";
-      videoEl.load();
+      videoEl.removeAttribute("src");
+      videoEl.preload = "none";
       videoEl.addEventListener("loadedmetadata", handleVideoMetadata);
       videoEl.addEventListener("loadeddata", handleVideoReady);
 
@@ -311,6 +433,7 @@ export default function ArchitecturalIntroSection({
 
       window.addEventListener("resize", handleResize, { passive: true });
       buildTimeline();
+      startVideoLoadingWhenReady();
 
       return () => {
         disposed = true;
@@ -321,7 +444,10 @@ export default function ArchitecturalIntroSection({
           window.clearTimeout(resizeTimeoutId);
         }
 
+        clearIdleLoad();
+        detachInteractionListeners();
         stopVideoSyncLoop();
+        loadingObserver?.disconnect();
         videoEl.removeEventListener("loadedmetadata", handleVideoMetadata);
         videoEl.removeEventListener("loadeddata", handleVideoReady);
         window.removeEventListener("resize", handleResize);
@@ -662,7 +788,7 @@ export default function ArchitecturalIntroSection({
       window.removeEventListener("resize", handleResize);
       gsapContext?.revert();
     };
-  }, [prefersReducedMotion, useLiteMedia, useVideoMedia]);
+  }, [desktopVideoSrc, prefersReducedMotion, useLiteMedia, useVideoMedia]);
 
   return (
     <section
@@ -683,10 +809,9 @@ export default function ArchitecturalIntroSection({
           <video
             ref={videoRef}
             className={`${styles.mediaVideo} ${useVideoMedia && isSequenceReady ? styles.mediaVideoVisible : ""}`}
-            src={useVideoMedia ? LUX_DESKTOP_VIDEO_SRC : undefined}
             muted
             playsInline
-            preload="metadata"
+            preload="none"
             aria-hidden="true"
           />
           <canvas

@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { clamp, isMobileLikeViewport, shouldUseLiteMedia } from "@/lib/mediaPlayback";
+import {
+  clamp,
+  isMobileLikeViewport,
+  shouldUseHighQualityDesktopVideo,
+  shouldUseLiteMedia,
+} from "@/lib/mediaPlayback";
 import usePrefersReducedMotion from "@/hooks/usePrefersReducedMotion";
 import styles from "./CinematicJourneySection.module.css";
 
@@ -40,7 +45,8 @@ const PHASES: JourneyPhase[] = [
 
 const DEFAULT_POSTER_SRC = "/videos/full-journey-scroll-poster.jpg";
 const DEFAULT_MOBILE_POSTER_SRC = "/videos/full-journey-scroll-poster-mobile.webp";
-const DEFAULT_DESKTOP_VIDEO_SRC = "/videos/full-journey-sequence-desktop.mp4";
+const DEFAULT_DESKTOP_VIDEO_STREAM_SRC = "/videos/full-journey-sequence-desktop-stream-v1.mp4";
+const DEFAULT_DESKTOP_VIDEO_HQ_SRC = "/videos/full-journey-sequence-desktop.mp4";
 const DEFAULT_SEQUENCE_BASE_PATH = "/videos/full-journey-sequence-60fps-v2";
 const DEFAULT_MOBILE_SEQUENCE_BASE_PATH = "/videos/full-journey-sequence-60fps-mobile";
 const DEFAULT_SEQUENCE_FRAME_COUNT = 907;
@@ -122,6 +128,11 @@ export default function CinematicJourneySection({
   const prefersReducedMotion = usePrefersReducedMotion();
   const useLiteMedia = shouldUseLiteMedia(MOBILE_BREAKPOINT);
   const useVideoMedia = !useLiteMedia && !prefersReducedMotion;
+  const desktopVideoSrc = useVideoMedia
+    ? shouldUseHighQualityDesktopVideo(MOBILE_BREAKPOINT)
+      ? DEFAULT_DESKTOP_VIDEO_HQ_SRC
+      : DEFAULT_DESKTOP_VIDEO_STREAM_SRC
+    : null;
   const resolvedPosterSrc =
     posterSrc ?? (useLiteMedia ? DEFAULT_MOBILE_POSTER_SRC : DEFAULT_POSTER_SRC);
   const resolvedSequenceBasePath =
@@ -242,6 +253,18 @@ export default function CinematicJourneySection({
         syncVideoTime(lastProgress, true);
       };
 
+      const attachVideoSource = () => {
+        if (!desktopVideoSrc) {
+          return;
+        }
+
+        if (videoEl.getAttribute("src") === desktopVideoSrc) {
+          return;
+        }
+
+        videoEl.src = desktopVideoSrc;
+      };
+
       const setInitialTextState = () => {
         gsap.set(phaseEls, { autoAlpha: 0, y: 18 });
         gsap.set(phaseEls[0], { autoAlpha: 1, y: 0 });
@@ -314,6 +337,7 @@ export default function CinematicJourneySection({
               return;
             }
 
+            attachVideoSource();
             videoEl.preload = "auto";
             videoEl.load();
             loadingObserver?.disconnect();
@@ -330,6 +354,7 @@ export default function CinematicJourneySection({
       };
 
       videoEl.pause();
+      videoEl.removeAttribute("src");
       videoEl.preload = "none";
       videoEl.addEventListener("loadedmetadata", handleVideoMetadata);
       videoEl.addEventListener("loadeddata", handleVideoReady);
@@ -739,6 +764,7 @@ export default function CinematicJourneySection({
       gsapContext?.revert();
     };
   }, [
+    desktopVideoSrc,
     prefersReducedMotion,
     resolvedSequenceBasePath,
     scrollDistanceDesktop,
@@ -767,10 +793,9 @@ export default function CinematicJourneySection({
           <video
             ref={videoRef}
             className={`${styles.mediaVideo} ${useVideoMedia && isSequenceReady ? styles.mediaVideoVisible : ""}`}
-            src={useVideoMedia ? DEFAULT_DESKTOP_VIDEO_SRC : undefined}
             muted
             playsInline
-            preload="metadata"
+            preload="none"
             aria-hidden="true"
           />
           <canvas

@@ -3,6 +3,7 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ArrowUpRight, MapPin, Maximize2 } from "lucide-react";
 import CinematicJourneySection from "@/components/CinematicJourneySection";
+import { VOYAGE_STAGE_EVENTS, onVoyageStageEvent } from "@/lib/voyageStageFlow";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -244,6 +245,28 @@ const ProjectsSection = () => {
     }, sectionRef);
 
     return () => ctx.revert();
+  }, []);
+
+  useEffect(() => {
+    const prefetchedSources = new Set<string>();
+    const preloadProjectImages = () => {
+      PROJECTS.forEach((project) => {
+        if (prefetchedSources.has(project.imageSrc)) {
+          return;
+        }
+
+        const image = new Image();
+        image.decoding = "async";
+        if ("fetchPriority" in image) {
+          (image as HTMLImageElement & { fetchPriority: "high" | "low" }).fetchPriority = "low";
+        }
+
+        image.src = project.imageSrc;
+        prefetchedSources.add(project.imageSrc);
+      });
+    };
+
+    return onVoyageStageEvent(VOYAGE_STAGE_EVENTS.preloadProjects, preloadProjectImages);
   }, []);
 
   const project = PROJECTS[activeIndex];

@@ -7,6 +7,11 @@ import {
   shouldUseHighQualityDesktopVideo,
   shouldUseLiteMedia,
 } from "@/lib/mediaPlayback";
+import {
+  VOYAGE_STAGE_EVENTS,
+  emitVoyageStageEvent,
+  onVoyageStageEvent,
+} from "@/lib/voyageStageFlow";
 import usePrefersReducedMotion from "@/hooks/usePrefersReducedMotion";
 import styles from "./CinematicJourneySection.module.css";
 
@@ -61,8 +66,9 @@ const VIDEO_TIME_EPSILON = 1 / 240;
 const INITIAL_HIGH_PRIORITY_FRAMES = 14;
 const PRIORITY_NEIGHBORHOOD_RADIUS = 12;
 const MAX_CONCURRENT_LOADS = 3;
-const SEQUENCE_START_ROOT_MARGIN = "140% 0px";
+const SEQUENCE_START_ROOT_MARGIN = "45% 0px";
 const STAGE_TRIGGER_GROUP = "voyage-stage-flow";
+const PROJECTS_PRELOAD_PROGRESS = 0.62;
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -168,10 +174,7 @@ export default function CinematicJourneySection({
     let renderRafId: number | null = null;
     let resizeTimeoutId: number | null = null;
     let loadingObserver: IntersectionObserver | null = null;
-    let preloadTimeoutId: number | null = null;
-    let preloadIdleHandle: number | null = null;
     let preloadStarted = false;
-    let interactionListenersAttached = false;
     let activeLoads = 0;
     let frameLerpFactor = DESKTOP_FRAME_LERP;
 
@@ -185,50 +188,13 @@ export default function CinematicJourneySection({
       let targetVideoTime = 0;
       let renderedVideoTime = 0;
       let videoSyncRafId: number | null = null;
-      const browserWindow = window as Window &
-        typeof globalThis & {
-          requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
-          cancelIdleCallback?: (handle: number) => void;
-        };
+      let projectsPreloadTriggered = false;
 
-      const clearPreloadSchedule = () => {
-        if (preloadTimeoutId !== null) {
-          window.clearTimeout(preloadTimeoutId);
-          preloadTimeoutId = null;
+      const updateStageProgress = (progress: number) => {
+        if (!projectsPreloadTriggered && progress >= PROJECTS_PRELOAD_PROGRESS) {
+          projectsPreloadTriggered = true;
+          emitVoyageStageEvent(VOYAGE_STAGE_EVENTS.preloadProjects);
         }
-
-        if (preloadIdleHandle !== null && typeof browserWindow.cancelIdleCallback === "function") {
-          browserWindow.cancelIdleCallback(preloadIdleHandle);
-          preloadIdleHandle = null;
-        }
-      };
-
-      const handleInteractionPreload = () => {
-        startBackgroundPreload();
-      };
-
-      const detachInteractionListeners = () => {
-        if (!interactionListenersAttached) {
-          return;
-        }
-
-        interactionListenersAttached = false;
-        window.removeEventListener("wheel", handleInteractionPreload);
-        window.removeEventListener("touchstart", handleInteractionPreload);
-        window.removeEventListener("pointerdown", handleInteractionPreload);
-        window.removeEventListener("keydown", handleInteractionPreload);
-      };
-
-      const attachInteractionListeners = () => {
-        if (interactionListenersAttached) {
-          return;
-        }
-
-        interactionListenersAttached = true;
-        window.addEventListener("wheel", handleInteractionPreload, { passive: true });
-        window.addEventListener("touchstart", handleInteractionPreload, { passive: true });
-        window.addEventListener("pointerdown", handleInteractionPreload, { passive: true });
-        window.addEventListener("keydown", handleInteractionPreload, { passive: true });
       };
 
       const stopVideoSyncLoop = () => {
@@ -327,8 +293,6 @@ export default function CinematicJourneySection({
         }
 
         preloadStarted = true;
-        clearPreloadSchedule();
-        detachInteractionListeners();
         attachVideoSource();
         videoEl.preload = "auto";
 
@@ -374,10 +338,12 @@ export default function CinematicJourneySection({
                 invalidateOnRefresh: true,
                 onUpdate: (self) => {
                   lastProgress = self.progress;
+                  updateStageProgress(lastProgress);
                   syncVideoTime(lastProgress);
                 },
                 onRefresh: (self) => {
                   lastProgress = self.progress;
+                  updateStageProgress(lastProgress);
                   syncVideoTime(lastProgress, true);
                 },
               },
@@ -396,6 +362,7 @@ export default function CinematicJourneySection({
 
         resizeTimeoutId = window.setTimeout(() => {
           buildTimeline();
+          updateStageProgress(lastProgress);
           syncVideoTime(lastProgress, true);
         }, 120);
       };
@@ -426,29 +393,12 @@ export default function CinematicJourneySection({
         loadingObserver.observe(sectionEl);
       };
 
-      const scheduleBackgroundPreload = () => {
-        if (prefersReducedMotion || !desktopVideoSrc) {
-          return;
-        }
-
-        const beginPreload = () => {
-          clearPreloadSchedule();
+      const stopStagePreloadSubscription = onVoyageStageEvent(
+        VOYAGE_STAGE_EVENTS.preloadJourney,
+        () => {
           startBackgroundPreload();
-        };
-
-        attachInteractionListeners();
-
-        if (typeof browserWindow.requestIdleCallback === "function") {
-          preloadIdleHandle = browserWindow.requestIdleCallback(() => {
-            beginPreload();
-          }, { timeout: 600 });
-          return;
-        }
-
-        preloadTimeoutId = window.setTimeout(() => {
-          beginPreload();
-        }, 350);
-      };
+        },
+      );
 
       videoEl.pause();
       videoEl.removeAttribute("src");
@@ -466,7 +416,7 @@ export default function CinematicJourneySection({
 
       window.addEventListener("resize", handleResize, { passive: true });
       buildTimeline();
-      scheduleBackgroundPreload();
+      updateStageProgress(lastProgress);
       startVideoLoadingWhenNearViewport();
 
       return () => {
@@ -478,8 +428,7 @@ export default function CinematicJourneySection({
           window.clearTimeout(resizeTimeoutId);
         }
 
-        clearPreloadSchedule();
-        detachInteractionListeners();
+        stopStagePreloadSubscription();
         stopVideoSyncLoop();
         loadingObserver?.disconnect();
         videoEl.removeEventListener("loadedmetadata", handleVideoMetadata);
@@ -790,9 +739,15 @@ export default function CinematicJourneySection({
               refreshPriority: 20,
               invalidateOnRefresh: true,
               onUpdate: (self) => {
+                if (self.progress >= PROJECTS_PRELOAD_PROGRESS) {
+                  emitVoyageStageEvent(VOYAGE_STAGE_EVENTS.preloadProjects);
+                }
                 setDesiredFrame(self.progress * (sequenceFrameCount - 1));
               },
               onRefresh: (self) => {
+                if (self.progress >= PROJECTS_PRELOAD_PROGRESS) {
+                  emitVoyageStageEvent(VOYAGE_STAGE_EVENTS.preloadProjects);
+                }
                 updateCanvasMetrics(images[currentFrameRef.current]);
                 setDesiredFrame(self.progress * (sequenceFrameCount - 1), true);
               },

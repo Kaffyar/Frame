@@ -7,6 +7,7 @@ import {
   shouldUseHighQualityDesktopVideo,
   shouldUseLiteMedia,
 } from "@/lib/mediaPlayback";
+import { VOYAGE_STAGE_EVENTS, emitVoyageStageEvent } from "@/lib/voyageStageFlow";
 import usePrefersReducedMotion from "@/hooks/usePrefersReducedMotion";
 import styles from "./ArchitecturalIntroSection.module.css";
 
@@ -44,6 +45,7 @@ const INITIAL_HIGH_PRIORITY_FRAMES = 6;
 const PRIORITY_NEIGHBORHOOD_RADIUS = 4;
 const MAX_CONCURRENT_LOADS = 3;
 const STAGE_TRIGGER_GROUP = "voyage-stage-flow";
+const JOURNEY_PRELOAD_PROGRESS = 0.58;
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -180,6 +182,14 @@ export default function ArchitecturalIntroSection({
       let targetVideoTime = 0;
       let renderedVideoTime = 0;
       let videoSyncRafId: number | null = null;
+      let journeyPreloadTriggered = false;
+
+      const updateStageProgress = (progress: number) => {
+        if (!journeyPreloadTriggered && progress >= JOURNEY_PRELOAD_PROGRESS) {
+          journeyPreloadTriggered = true;
+          emitVoyageStageEvent(VOYAGE_STAGE_EVENTS.preloadJourney);
+        }
+      };
 
       const clearIdleLoad = () => {
         if (idleLoadTimeoutId !== null) {
@@ -358,10 +368,12 @@ export default function ArchitecturalIntroSection({
                 invalidateOnRefresh: true,
                 onUpdate: (self) => {
                   lastProgress = self.progress;
+                  updateStageProgress(lastProgress);
                   syncVideoTime(lastProgress);
                 },
                 onRefresh: (self) => {
                   lastProgress = self.progress;
+                  updateStageProgress(lastProgress);
                   syncVideoTime(lastProgress, true);
                 },
               },
@@ -381,6 +393,7 @@ export default function ArchitecturalIntroSection({
 
         resizeTimeoutId = window.setTimeout(() => {
           buildTimeline();
+          updateStageProgress(lastProgress);
           syncVideoTime(lastProgress, true);
         }, 120);
       };
@@ -437,6 +450,7 @@ export default function ArchitecturalIntroSection({
 
       window.addEventListener("resize", handleResize, { passive: true });
       buildTimeline();
+      updateStageProgress(lastProgress);
       startVideoLoadingWhenReady();
 
       return () => {
@@ -733,9 +747,15 @@ export default function ArchitecturalIntroSection({
               refreshPriority: 30,
               invalidateOnRefresh: true,
               onUpdate: (self) => {
+                if (self.progress >= JOURNEY_PRELOAD_PROGRESS) {
+                  emitVoyageStageEvent(VOYAGE_STAGE_EVENTS.preloadJourney);
+                }
                 scheduleFrame(self.progress * (LUX_SEQUENCE_FRAME_COUNT - 1));
               },
               onRefresh: (self) => {
+                if (self.progress >= JOURNEY_PRELOAD_PROGRESS) {
+                  emitVoyageStageEvent(VOYAGE_STAGE_EVENTS.preloadJourney);
+                }
                 updateCanvasMetrics(images[currentFrameRef.current]);
                 scheduleFrame(self.progress * (LUX_SEQUENCE_FRAME_COUNT - 1), true);
               },

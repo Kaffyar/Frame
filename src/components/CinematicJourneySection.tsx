@@ -45,6 +45,7 @@ const PHASES: JourneyPhase[] = [
 
 const DEFAULT_POSTER_SRC = "/videos/full-journey-scroll-poster.jpg";
 const DEFAULT_MOBILE_POSTER_SRC = "/videos/full-journey-scroll-poster-mobile.webp";
+const DEFAULT_DESKTOP_VIDEO_LITE_SRC = "/videos/full-journey-sequence-desktop-lite-v2.mp4";
 const DEFAULT_DESKTOP_VIDEO_STREAM_SRC = "/videos/full-journey-sequence-desktop-stream-v1.mp4";
 const DEFAULT_DESKTOP_VIDEO_HQ_SRC = "/videos/full-journey-sequence-desktop.mp4";
 const DEFAULT_SEQUENCE_BASE_PATH = "/videos/full-journey-sequence-60fps-v2";
@@ -60,7 +61,7 @@ const VIDEO_TIME_EPSILON = 1 / 240;
 const INITIAL_HIGH_PRIORITY_FRAMES = 14;
 const PRIORITY_NEIGHBORHOOD_RADIUS = 12;
 const MAX_CONCURRENT_LOADS = 3;
-const SEQUENCE_START_ROOT_MARGIN = "80% 0px";
+const SEQUENCE_START_ROOT_MARGIN = "35% 0px";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -128,10 +129,15 @@ export default function CinematicJourneySection({
   const prefersReducedMotion = usePrefersReducedMotion();
   const useLiteMedia = shouldUseLiteMedia(MOBILE_BREAKPOINT);
   const useVideoMedia = !useLiteMedia && !prefersReducedMotion;
+  const isLocalPreview =
+    typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const useHighQualityDesktopVideo = shouldUseHighQualityDesktopVideo(MOBILE_BREAKPOINT);
   const desktopVideoSrc = useVideoMedia
-    ? shouldUseHighQualityDesktopVideo(MOBILE_BREAKPOINT)
+    ? isLocalPreview
       ? DEFAULT_DESKTOP_VIDEO_HQ_SRC
-      : DEFAULT_DESKTOP_VIDEO_STREAM_SRC
+      : useHighQualityDesktopVideo
+        ? DEFAULT_DESKTOP_VIDEO_STREAM_SRC
+        : DEFAULT_DESKTOP_VIDEO_LITE_SRC
     : null;
   const resolvedPosterSrc =
     posterSrc ?? (useLiteMedia ? DEFAULT_MOBILE_POSTER_SRC : DEFAULT_POSTER_SRC);

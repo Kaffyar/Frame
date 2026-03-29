@@ -498,7 +498,7 @@ export default function ArchitecturalIntroSection({
         <div className={styles.gridOverlay} aria-hidden="true" />
 
         <div className={styles.metaLayer} aria-hidden="true">
-          <span className={`${styles.metaText} ${styles.metaTopRight}`}>{role} / Portfolio 2026</span>
+          <span className={`${styles.metaText} ${styles.metaTopRight}`}>{role} / 2026</span>
           <span
             ref={scrollPromptRef}
             className={`${styles.metaText} ${styles.metaBottomCenter} ${prefersReducedMotion ? styles.metaHidden : ""}`}

@@ -27,6 +27,7 @@ interface ArchitecturalIntroSectionProps {
 
 const LUX_POSTER_SRC = "/videos/luxury-black-house-poster-premium.jpg";
 const LUX_MOBILE_POSTER_SRC = "/videos/luxury-black-house-poster-mobile.webp";
+const LUX_MOBILE_VIDEO_SRC = "/videos/luxury-black-house-sequence-mobile-scrub-v1.mp4";
 const LUX_DESKTOP_VIDEO_STREAM_SRC = "/videos/luxury-black-house-sequence-desktop-stream-v1.mp4";
 const LUX_DESKTOP_VIDEO_HQ_SRC = "/videos/luxury-black-house-sequence-desktop.mp4";
 const LUX_SEQUENCE_FRAME_COUNT = 477;
@@ -40,6 +41,7 @@ const MOBILE_SCRUB_AMOUNT = 1.24;
 const DESKTOP_FRAME_LERP = 0.16;
 const MOBILE_FRAME_LERP = 0.22;
 const DESKTOP_VIDEO_TIME_LERP = 0.28;
+const MOBILE_VIDEO_TIME_LERP = 0.34;
 const VIDEO_TIME_EPSILON = 1 / 240;
 const INITIAL_HIGH_PRIORITY_FRAMES = 6;
 const PRIORITY_NEIGHBORHOOD_RADIUS = 4;
@@ -114,14 +116,17 @@ export default function ArchitecturalIntroSection({
   const lastDrawnFrameRef = useRef(-1);
   const sequenceReadyRef = useRef(false);
   const prefersReducedMotion = usePrefersReducedMotion();
+  const isMobileViewport = isMobileLikeViewport(MOBILE_BREAKPOINT);
   const useLiteMedia = shouldUseLiteMedia(MOBILE_BREAKPOINT);
-  const useVideoMedia = !useLiteMedia && !prefersReducedMotion;
-  const desktopVideoSrc = useVideoMedia
-    ? shouldUseHighQualityDesktopVideo(MOBILE_BREAKPOINT)
-      ? LUX_DESKTOP_VIDEO_HQ_SRC
-      : LUX_DESKTOP_VIDEO_STREAM_SRC
-    : null;
-  const posterSrc = useLiteMedia ? LUX_MOBILE_POSTER_SRC : LUX_POSTER_SRC;
+  const scrubVideoSrc = prefersReducedMotion
+    ? null
+    : isMobileViewport
+      ? LUX_MOBILE_VIDEO_SRC
+      : shouldUseHighQualityDesktopVideo(MOBILE_BREAKPOINT)
+        ? LUX_DESKTOP_VIDEO_HQ_SRC
+        : LUX_DESKTOP_VIDEO_STREAM_SRC;
+  const useVideoMedia = scrubVideoSrc !== null;
+  const posterSrc = isMobileViewport || useLiteMedia ? LUX_MOBILE_POSTER_SRC : LUX_POSTER_SRC;
   const [isSequenceReady, setIsSequenceReady] = useState(false);
   const manifestoSentence = `${manifesto.split(". ")[0]?.replace(/\.$/, "")}.`;
 
@@ -183,6 +188,7 @@ export default function ArchitecturalIntroSection({
       let renderedVideoTime = 0;
       let videoSyncRafId: number | null = null;
       let journeyPreloadTriggered = false;
+      let videoTimeLerp = isMobileViewport ? MOBILE_VIDEO_TIME_LERP : DESKTOP_VIDEO_TIME_LERP;
 
       const updateStageProgress = (progress: number) => {
         if (!journeyPreloadTriggered && progress >= JOURNEY_PRELOAD_PROGRESS) {
@@ -232,15 +238,15 @@ export default function ArchitecturalIntroSection({
       };
 
       const attachVideoSource = () => {
-        if (!desktopVideoSrc) {
+        if (!scrubVideoSrc) {
           return;
         }
 
-        if (videoEl.getAttribute("src") === desktopVideoSrc) {
+        if (videoEl.getAttribute("src") === scrubVideoSrc) {
           return;
         }
 
-        videoEl.src = desktopVideoSrc;
+        videoEl.src = scrubVideoSrc;
       };
 
       const startVideoLoading = () => {
@@ -287,7 +293,7 @@ export default function ArchitecturalIntroSection({
           if (Math.abs(delta) <= VIDEO_TIME_EPSILON) {
             renderedVideoTime = targetVideoTime;
           } else {
-            renderedVideoTime += delta * DESKTOP_VIDEO_TIME_LERP;
+            renderedVideoTime += delta * videoTimeLerp;
           }
 
           setVideoCurrentTime(renderedVideoTime);
@@ -347,8 +353,10 @@ export default function ArchitecturalIntroSection({
             return;
           }
 
-          const scrollDistance = DESKTOP_SCROLL_DISTANCE;
-          const scrubAmount = DESKTOP_SCRUB_AMOUNT;
+          const isMobileLike = isMobileLikeViewport(MOBILE_BREAKPOINT);
+          const scrollDistance = isMobileLike ? MOBILE_SCROLL_DISTANCE : DESKTOP_SCROLL_DISTANCE;
+          const scrubAmount = isMobileLike ? MOBILE_SCRUB_AMOUNT : DESKTOP_SCRUB_AMOUNT;
+          videoTimeLerp = isMobileLike ? MOBILE_VIDEO_TIME_LERP : DESKTOP_VIDEO_TIME_LERP;
 
           gsap
             .timeline({
@@ -815,7 +823,7 @@ export default function ArchitecturalIntroSection({
       window.removeEventListener("resize", handleResize);
       gsapContext?.revert();
     };
-  }, [desktopVideoSrc, prefersReducedMotion, useLiteMedia, useVideoMedia]);
+  }, [isMobileViewport, prefersReducedMotion, scrubVideoSrc, useLiteMedia, useVideoMedia]);
 
   return (
     <section

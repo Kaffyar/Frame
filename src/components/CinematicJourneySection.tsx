@@ -50,6 +50,7 @@ const PHASES: JourneyPhase[] = [
 
 const DEFAULT_POSTER_SRC = "/videos/full-journey-scroll-poster.jpg";
 const DEFAULT_MOBILE_POSTER_SRC = "/videos/full-journey-scroll-poster-mobile.webp";
+const DEFAULT_MOBILE_VIDEO_SRC = "/videos/full-journey-sequence-mobile-scrub-v1.mp4";
 const DEFAULT_DESKTOP_VIDEO_LITE_SRC = "/videos/full-journey-sequence-desktop-lite-v2.mp4";
 const DEFAULT_DESKTOP_VIDEO_STREAM_SRC = "/videos/full-journey-sequence-desktop-stream-v1.mp4";
 const DEFAULT_DESKTOP_VIDEO_HQ_SRC = "/videos/full-journey-sequence-desktop.mp4";
@@ -62,6 +63,7 @@ const MOBILE_SCRUB_AMOUNT = 1.16;
 const DESKTOP_FRAME_LERP = 0.14;
 const MOBILE_FRAME_LERP = 0.18;
 const DESKTOP_VIDEO_TIME_LERP = 0.24;
+const MOBILE_VIDEO_TIME_LERP = 0.32;
 const VIDEO_TIME_EPSILON = 1 / 240;
 const INITIAL_HIGH_PRIORITY_FRAMES = 14;
 const PRIORITY_NEIGHBORHOOD_RADIUS = 12;
@@ -134,23 +136,26 @@ export default function CinematicJourneySection({
   const sequenceStartedRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
+  const isMobileViewport = isMobileLikeViewport(MOBILE_BREAKPOINT);
   const useLiteMedia = shouldUseLiteMedia(MOBILE_BREAKPOINT);
-  const useVideoMedia = !useLiteMedia && !prefersReducedMotion;
   const isLocalPreview =
     typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname);
   const useHighQualityDesktopVideo = shouldUseHighQualityDesktopVideo(MOBILE_BREAKPOINT);
-  const desktopVideoSrc = useVideoMedia
-    ? isLocalPreview
-      ? DEFAULT_DESKTOP_VIDEO_HQ_SRC
-      : useHighQualityDesktopVideo
-        ? DEFAULT_DESKTOP_VIDEO_STREAM_SRC
-        : DEFAULT_DESKTOP_VIDEO_LITE_SRC
-    : null;
+  const scrubVideoSrc = prefersReducedMotion
+    ? null
+    : isMobileViewport
+      ? DEFAULT_MOBILE_VIDEO_SRC
+      : isLocalPreview
+        ? DEFAULT_DESKTOP_VIDEO_HQ_SRC
+        : useHighQualityDesktopVideo
+          ? DEFAULT_DESKTOP_VIDEO_STREAM_SRC
+          : DEFAULT_DESKTOP_VIDEO_LITE_SRC;
+  const useVideoMedia = scrubVideoSrc !== null;
   const resolvedPosterSrc =
-    posterSrc ?? (useLiteMedia ? DEFAULT_MOBILE_POSTER_SRC : DEFAULT_POSTER_SRC);
+    posterSrc ?? (isMobileViewport || useLiteMedia ? DEFAULT_MOBILE_POSTER_SRC : DEFAULT_POSTER_SRC);
   const resolvedSequenceBasePath =
     sequenceBasePath ??
-    (useLiteMedia ? DEFAULT_MOBILE_SEQUENCE_BASE_PATH : DEFAULT_SEQUENCE_BASE_PATH);
+    (isMobileViewport || useLiteMedia ? DEFAULT_MOBILE_SEQUENCE_BASE_PATH : DEFAULT_SEQUENCE_BASE_PATH);
   const [isSequenceReady, setIsSequenceReady] = useState(false);
 
   useEffect(() => {
@@ -189,6 +194,7 @@ export default function CinematicJourneySection({
       let renderedVideoTime = 0;
       let videoSyncRafId: number | null = null;
       let projectsPreloadTriggered = false;
+      let videoTimeLerp = isMobileViewport ? MOBILE_VIDEO_TIME_LERP : DESKTOP_VIDEO_TIME_LERP;
 
       const updateStageProgress = (progress: number) => {
         if (!projectsPreloadTriggered && progress >= PROJECTS_PRELOAD_PROGRESS) {
@@ -227,7 +233,7 @@ export default function CinematicJourneySection({
           if (Math.abs(delta) <= VIDEO_TIME_EPSILON) {
             renderedVideoTime = targetVideoTime;
           } else {
-            renderedVideoTime += delta * DESKTOP_VIDEO_TIME_LERP;
+            renderedVideoTime += delta * videoTimeLerp;
           }
 
           setVideoCurrentTime(renderedVideoTime);
@@ -276,19 +282,19 @@ export default function CinematicJourneySection({
       };
 
       const attachVideoSource = () => {
-        if (!desktopVideoSrc) {
+        if (!scrubVideoSrc) {
           return;
         }
 
-        if (videoEl.getAttribute("src") === desktopVideoSrc) {
+        if (videoEl.getAttribute("src") === scrubVideoSrc) {
           return;
         }
 
-        videoEl.src = desktopVideoSrc;
+        videoEl.src = scrubVideoSrc;
       };
 
       const startBackgroundPreload = () => {
-        if (!desktopVideoSrc || disposed || preloadStarted) {
+        if (!scrubVideoSrc || disposed || preloadStarted) {
           return;
         }
 
@@ -317,8 +323,10 @@ export default function CinematicJourneySection({
 
           setInitialTextState();
 
-          const scrollDistance = scrollDistanceDesktop;
-          const scrubAmount = DESKTOP_SCRUB_AMOUNT;
+          const isMobileLike = isMobileLikeViewport(MOBILE_BREAKPOINT);
+          const scrollDistance = isMobileLike ? scrollDistanceMobile : scrollDistanceDesktop;
+          const scrubAmount = isMobileLike ? MOBILE_SCRUB_AMOUNT : DESKTOP_SCRUB_AMOUNT;
+          videoTimeLerp = isMobileLike ? MOBILE_VIDEO_TIME_LERP : DESKTOP_VIDEO_TIME_LERP;
 
           gsap
             .timeline({
@@ -822,13 +830,14 @@ export default function CinematicJourneySection({
       gsapContext?.revert();
     };
   }, [
-    desktopVideoSrc,
     isLocalPreview,
+    isMobileViewport,
     prefersReducedMotion,
     resolvedSequenceBasePath,
     scrollDistanceDesktop,
     scrollDistanceMobile,
     sequenceFrameCount,
+    scrubVideoSrc,
     useVideoMedia,
   ]);
 

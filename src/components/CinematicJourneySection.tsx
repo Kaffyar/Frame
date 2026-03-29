@@ -3,9 +3,11 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import {
   clamp,
+  getWarmedMediaSource,
   isMobileLikeViewport,
   shouldUseHighQualityDesktopVideo,
   shouldUseLiteMedia,
+  warmMediaSource,
 } from "@/lib/mediaPlayback";
 import usePrefersReducedMotion from "@/hooks/usePrefersReducedMotion";
 import styles from "./CinematicJourneySection.module.css";
@@ -61,7 +63,7 @@ const VIDEO_TIME_EPSILON = 1 / 240;
 const INITIAL_HIGH_PRIORITY_FRAMES = 14;
 const PRIORITY_NEIGHBORHOOD_RADIUS = 12;
 const MAX_CONCURRENT_LOADS = 3;
-const SEQUENCE_START_ROOT_MARGIN = "35% 0px";
+const SEQUENCE_START_ROOT_MARGIN = "140% 0px";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -125,6 +127,7 @@ export default function CinematicJourneySection({
   const lastDrawnFrameRef = useRef(-1);
   const sequenceReadyRef = useRef(false);
   const sequenceStartedRef = useRef(false);
+  const warmedVideoSrcRef = useRef<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
   const useLiteMedia = shouldUseLiteMedia(MOBILE_BREAKPOINT);
@@ -167,8 +170,13 @@ export default function CinematicJourneySection({
     let renderRafId: number | null = null;
     let resizeTimeoutId: number | null = null;
     let loadingObserver: IntersectionObserver | null = null;
+    let warmupAbortController: AbortController | null = null;
+    let warmupTimeoutId: number | null = null;
+    let warmupIdleHandle: number | null = null;
     let activeLoads = 0;
     let frameLerpFactor = DESKTOP_FRAME_LERP;
+
+    warmedVideoSrcRef.current = desktopVideoSrc ? getWarmedMediaSource(desktopVideoSrc) : null;
 
     if (useVideoMedia) {
       if (!videoEl) {
@@ -180,6 +188,23 @@ export default function CinematicJourneySection({
       let targetVideoTime = 0;
       let renderedVideoTime = 0;
       let videoSyncRafId: number | null = null;
+      const browserWindow = window as Window &
+        typeof globalThis & {
+          requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+          cancelIdleCallback?: (handle: number) => void;
+        };
+
+      const clearWarmupSchedule = () => {
+        if (warmupTimeoutId !== null) {
+          window.clearTimeout(warmupTimeoutId);
+          warmupTimeoutId = null;
+        }
+
+        if (warmupIdleHandle !== null && typeof browserWindow.cancelIdleCallback === "function") {
+          browserWindow.cancelIdleCallback(warmupIdleHandle);
+          warmupIdleHandle = null;
+        }
+      };
 
       const stopVideoSyncLoop = () => {
         if (videoSyncRafId !== null) {
@@ -260,15 +285,42 @@ export default function CinematicJourneySection({
       };
 
       const attachVideoSource = () => {
-        if (!desktopVideoSrc) {
+        const resolvedVideoSrc = warmedVideoSrcRef.current ?? desktopVideoSrc;
+
+        if (!resolvedVideoSrc) {
           return;
         }
 
-        if (videoEl.getAttribute("src") === desktopVideoSrc) {
+        if (videoEl.getAttribute("src") === resolvedVideoSrc) {
           return;
         }
 
-        videoEl.src = desktopVideoSrc;
+        videoEl.src = resolvedVideoSrc;
+      };
+
+      const startBackgroundWarmup = () => {
+        if (!desktopVideoSrc || disposed || isLocalPreview || warmedVideoSrcRef.current) {
+          return;
+        }
+
+        warmupAbortController?.abort();
+        warmupAbortController = new AbortController();
+
+        void warmMediaSource(desktopVideoSrc, warmupAbortController.signal)
+          .then((warmedSource) => {
+            if (disposed) {
+              return;
+            }
+
+            warmedVideoSrcRef.current = warmedSource;
+          })
+          .catch(() => {
+            if (disposed) {
+              return;
+            }
+
+            warmedVideoSrcRef.current = getWarmedMediaSource(desktopVideoSrc);
+          });
       };
 
       const setInitialTextState = () => {
@@ -359,6 +411,28 @@ export default function CinematicJourneySection({
         loadingObserver.observe(sectionEl);
       };
 
+      const scheduleBackgroundWarmup = () => {
+        if (prefersReducedMotion || !desktopVideoSrc || isLocalPreview) {
+          return;
+        }
+
+        const beginWarmup = () => {
+          clearWarmupSchedule();
+          startBackgroundWarmup();
+        };
+
+        if (typeof browserWindow.requestIdleCallback === "function") {
+          warmupIdleHandle = browserWindow.requestIdleCallback(() => {
+            beginWarmup();
+          }, { timeout: 1200 });
+          return;
+        }
+
+        warmupTimeoutId = window.setTimeout(() => {
+          beginWarmup();
+        }, 600);
+      };
+
       videoEl.pause();
       videoEl.removeAttribute("src");
       videoEl.preload = "none";
@@ -375,6 +449,7 @@ export default function CinematicJourneySection({
 
       window.addEventListener("resize", handleResize, { passive: true });
       buildTimeline();
+      scheduleBackgroundWarmup();
       startVideoLoadingWhenNearViewport();
 
       return () => {
@@ -386,6 +461,8 @@ export default function CinematicJourneySection({
           window.clearTimeout(resizeTimeoutId);
         }
 
+        clearWarmupSchedule();
+        warmupAbortController?.abort();
         stopVideoSyncLoop();
         loadingObserver?.disconnect();
         videoEl.removeEventListener("loadedmetadata", handleVideoMetadata);
@@ -771,6 +848,7 @@ export default function CinematicJourneySection({
     };
   }, [
     desktopVideoSrc,
+    isLocalPreview,
     prefersReducedMotion,
     resolvedSequenceBasePath,
     scrollDistanceDesktop,

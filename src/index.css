@@ -1,0 +1,147 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Portfolio dark luxurious palette */
+    --background: 0 0% 2%;
+    --foreground: 30 15% 88%;
+
+    --card: 0 0% 5%;
+    --card-foreground: 30 15% 88%;
+
+    --popover: 0 0% 5%;
+    --popover-foreground: 30 15% 88%;
+
+    --primary: 38 45% 62%;
+    --primary-foreground: 0 0% 2%;
+
+    --secondary: 0 0% 8%;
+    --secondary-foreground: 30 15% 88%;
+
+    --muted: 0 0% 12%;
+    --muted-foreground: 220 10% 50%;
+
+    --accent: 38 45% 62%;
+    --accent-foreground: 0 0% 2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 0 0% 14%;
+    --input: 0 0% 14%;
+    --ring: 38 45% 62%;
+
+    --radius: 0.25rem;
+
+    /* Cinematic section tokens */
+    --cinematic-bg: 0 0% 2%;
+    --cinematic-gold: 38 45% 62%;
+    --cinematic-heading: 30 15% 88%;
+    --cinematic-body: 220 10% 65%;
+
+    /* Portfolio-specific tokens */
+    --gold: 38 45% 62%;
+    --gold-dim: 38 30% 40%;
+    --heading: 30 15% 88%;
+    --body: 220 10% 65%;
+    --surface: 0 0% 5%;
+    --surface-hover: 0 0% 8%;
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 3%;
+    --sidebar-foreground: 220 10% 65%;
+    --sidebar-primary: 38 45% 62%;
+    --sidebar-primary-foreground: 0 0% 2%;
+    --sidebar-accent: 0 0% 8%;
+    --sidebar-accent-foreground: 30 15% 88%;
+    --sidebar-border: 0 0% 12%;
+    --sidebar-ring: 38 45% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Cormorant Garamond', serif;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Cormorant Garamond', serif;
+  }
+
+  .font-body {
+    font-family: 'Inter', sans-serif;
+  }
+
+  .text-gold {
+    color: hsl(var(--gold));
+  }
+
+  .text-heading {
+    color: hsl(var(--heading));
+  }
+
+  .text-body-muted {
+    color: hsl(var(--body));
+  }
+
+  .bg-surface {
+    background-color: hsl(var(--surface));
+  }
+
+  .gold-separator {
+    background: linear-gradient(to bottom, hsl(var(--gold) / 0.5), transparent);
+  }
+
+  .gold-glow {
+    box-shadow: 0 0 40px hsl(var(--gold) / 0.08);
+  }
+}
+
+/* Page fade-in */
+@keyframes pageIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  animation: pageIn 0.8s ease-out;
+}
+
+/* Gold focus ring globally */
+input:focus, textarea:focus, select:focus, button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px hsl(var(--gold) / 0.3);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--gold) / 0.3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--gold) / 0.5);
+}

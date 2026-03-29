@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { clamp, isMobileLikeViewport } from "@/lib/mediaPlayback";
+import { clamp, isMobileLikeViewport, shouldUseLiteMedia } from "@/lib/mediaPlayback";
 import usePrefersReducedMotion from "@/hooks/usePrefersReducedMotion";
 import styles from "./CinematicJourneySection.module.css";
 
@@ -39,16 +39,21 @@ const PHASES: JourneyPhase[] = [
 ];
 
 const DEFAULT_POSTER_SRC = "/videos/full-journey-scroll-poster.jpg";
+const DEFAULT_MOBILE_POSTER_SRC = "/videos/full-journey-scroll-poster-mobile.webp";
+const DEFAULT_DESKTOP_VIDEO_SRC = "/videos/full-journey-sequence-desktop.mp4";
 const DEFAULT_SEQUENCE_BASE_PATH = "/videos/full-journey-sequence-60fps-v2";
+const DEFAULT_MOBILE_SEQUENCE_BASE_PATH = "/videos/full-journey-sequence-60fps-mobile";
 const DEFAULT_SEQUENCE_FRAME_COUNT = 907;
 const MOBILE_BREAKPOINT = 767;
 const DESKTOP_SCRUB_AMOUNT = 1.02;
 const MOBILE_SCRUB_AMOUNT = 1.16;
 const DESKTOP_FRAME_LERP = 0.14;
 const MOBILE_FRAME_LERP = 0.18;
-const INITIAL_HIGH_PRIORITY_FRAMES = 36;
-const PRIORITY_NEIGHBORHOOD_RADIUS = 20;
-const MAX_CONCURRENT_LOADS = 4;
+const DESKTOP_VIDEO_TIME_LERP = 0.24;
+const VIDEO_TIME_EPSILON = 1 / 240;
+const INITIAL_HIGH_PRIORITY_FRAMES = 14;
+const PRIORITY_NEIGHBORHOOD_RADIUS = 12;
+const MAX_CONCURRENT_LOADS = 3;
 const SEQUENCE_START_ROOT_MARGIN = "80% 0px";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -96,11 +101,11 @@ function drawCoverFrame(
 }
 
 export default function CinematicJourneySection({
-  posterSrc = DEFAULT_POSTER_SRC,
+  posterSrc,
   className,
   scrollDistanceDesktop = 4400,
   scrollDistanceMobile = 3000,
-  sequenceBasePath = DEFAULT_SEQUENCE_BASE_PATH,
+  sequenceBasePath,
   sequenceFrameCount = DEFAULT_SEQUENCE_FRAME_COUNT,
 }: CinematicJourneySectionProps) {
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -113,13 +118,22 @@ export default function CinematicJourneySection({
   const lastDrawnFrameRef = useRef(-1);
   const sequenceReadyRef = useRef(false);
   const sequenceStartedRef = useRef(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const prefersReducedMotion = usePrefersReducedMotion();
+  const useLiteMedia = shouldUseLiteMedia(MOBILE_BREAKPOINT);
+  const useVideoMedia = !useLiteMedia && !prefersReducedMotion;
+  const resolvedPosterSrc =
+    posterSrc ?? (useLiteMedia ? DEFAULT_MOBILE_POSTER_SRC : DEFAULT_POSTER_SRC);
+  const resolvedSequenceBasePath =
+    sequenceBasePath ??
+    (useLiteMedia ? DEFAULT_MOBILE_SEQUENCE_BASE_PATH : DEFAULT_SEQUENCE_BASE_PATH);
   const [isSequenceReady, setIsSequenceReady] = useState(false);
 
   useEffect(() => {
     const sectionEl = sectionRef.current;
     const pinEl = pinRef.current;
     const canvasEl = canvasRef.current;
+    const videoEl = videoRef.current;
     const phaseEls = phaseRefs.current.filter(Boolean) as HTMLDivElement[];
     const canvasContext =
       canvasEl?.getContext("2d", {
@@ -138,6 +152,217 @@ export default function CinematicJourneySection({
     let loadingObserver: IntersectionObserver | null = null;
     let activeLoads = 0;
     let frameLerpFactor = DESKTOP_FRAME_LERP;
+
+    if (useVideoMedia) {
+      if (!videoEl) {
+        return;
+      }
+
+      let videoDuration = sequenceFrameCount / 60;
+      let lastProgress = 0;
+      let targetVideoTime = 0;
+      let renderedVideoTime = 0;
+      let videoSyncRafId: number | null = null;
+
+      const stopVideoSyncLoop = () => {
+        if (videoSyncRafId !== null) {
+          window.cancelAnimationFrame(videoSyncRafId);
+          videoSyncRafId = null;
+        }
+      };
+
+      const setVideoCurrentTime = (time: number, force = false) => {
+        if (videoEl.readyState < 1) {
+          return;
+        }
+
+        if (!force && Math.abs(videoEl.currentTime - time) < VIDEO_TIME_EPSILON) {
+          return;
+        }
+
+        try {
+          videoEl.currentTime = time;
+        } catch {
+          // Ignore seek errors while metadata is still settling.
+        }
+      };
+
+      const tickVideoSync = () => {
+        videoSyncRafId = window.requestAnimationFrame(() => {
+          const delta = targetVideoTime - renderedVideoTime;
+
+          if (Math.abs(delta) <= VIDEO_TIME_EPSILON) {
+            renderedVideoTime = targetVideoTime;
+          } else {
+            renderedVideoTime += delta * DESKTOP_VIDEO_TIME_LERP;
+          }
+
+          setVideoCurrentTime(renderedVideoTime);
+
+          if (Math.abs(targetVideoTime - renderedVideoTime) > VIDEO_TIME_EPSILON) {
+            tickVideoSync();
+            return;
+          }
+
+          videoSyncRafId = null;
+          renderedVideoTime = targetVideoTime;
+          setVideoCurrentTime(renderedVideoTime, true);
+        });
+      };
+
+      const syncVideoTime = (progress: number, force = false) => {
+        const maxTime = Math.max(0, videoDuration - 1 / 60);
+        targetVideoTime = clamp(progress * videoDuration, 0, maxTime);
+
+        if (force || !sequenceReadyRef.current) {
+          stopVideoSyncLoop();
+          renderedVideoTime = targetVideoTime;
+          setVideoCurrentTime(renderedVideoTime, true);
+          return;
+        }
+
+        if (videoSyncRafId === null) {
+          tickVideoSync();
+        }
+      };
+
+      const handleVideoMetadata = () => {
+        videoDuration = videoEl.duration || videoDuration;
+        renderedVideoTime = clamp(videoEl.currentTime || 0, 0, Math.max(0, videoDuration - 1 / 60));
+        syncVideoTime(lastProgress, true);
+      };
+
+      const handleVideoReady = () => {
+        if (disposed) {
+          return;
+        }
+
+        sequenceReadyRef.current = true;
+        setIsSequenceReady(true);
+        syncVideoTime(lastProgress, true);
+      };
+
+      const setInitialTextState = () => {
+        gsap.set(phaseEls, { autoAlpha: 0, y: 18 });
+        gsap.set(phaseEls[0], { autoAlpha: 1, y: 0 });
+      };
+
+      const buildTimeline = () => {
+        gsapContext?.revert();
+
+        gsapContext = gsap.context(() => {
+          if (prefersReducedMotion) {
+            gsap.set(phaseEls, { clearProps: "all" });
+            return;
+          }
+
+          setInitialTextState();
+
+          const scrollDistance = scrollDistanceDesktop;
+          const scrubAmount = DESKTOP_SCRUB_AMOUNT;
+
+          gsap
+            .timeline({
+              defaults: { ease: "none" },
+              scrollTrigger: {
+                trigger: sectionEl,
+                start: "top top",
+                end: () => `+=${scrollDistance}`,
+                pin: pinEl,
+                pinSpacing: true,
+                scrub: scrubAmount,
+                anticipatePin: 1,
+                fastScrollEnd: true,
+                invalidateOnRefresh: true,
+                onUpdate: (self) => {
+                  lastProgress = self.progress;
+                  syncVideoTime(lastProgress);
+                },
+                onRefresh: (self) => {
+                  lastProgress = self.progress;
+                  syncVideoTime(lastProgress, true);
+                },
+              },
+            })
+            .to(phaseEls[0], { autoAlpha: 0, y: -16, duration: 0.12, ease: "power2.out" }, 0.42)
+            .to(phaseEls[1], { autoAlpha: 1, y: 0, duration: 0.16, ease: "power2.out" }, 0.49)
+            .to(phaseEls[1], { autoAlpha: 0, y: -16, duration: 0.12, ease: "power2.out" }, 0.74)
+            .to(phaseEls[2], { autoAlpha: 1, y: 0, duration: 0.16, ease: "power2.out" }, 0.81);
+        }, sectionEl);
+      };
+
+      const handleResize = () => {
+        if (resizeTimeoutId !== null) {
+          window.clearTimeout(resizeTimeoutId);
+        }
+
+        resizeTimeoutId = window.setTimeout(() => {
+          buildTimeline();
+          syncVideoTime(lastProgress, true);
+        }, 120);
+      };
+
+      const startVideoLoadingWhenNearViewport = () => {
+        if (prefersReducedMotion) {
+          return;
+        }
+
+        loadingObserver = new IntersectionObserver(
+          (entries) => {
+            const [entry] = entries;
+            if (!entry?.isIntersecting) {
+              return;
+            }
+
+            videoEl.preload = "auto";
+            videoEl.load();
+            loadingObserver?.disconnect();
+            loadingObserver = null;
+          },
+          {
+            root: null,
+            rootMargin: SEQUENCE_START_ROOT_MARGIN,
+            threshold: 0,
+          },
+        );
+
+        loadingObserver.observe(sectionEl);
+      };
+
+      videoEl.pause();
+      videoEl.preload = "none";
+      videoEl.addEventListener("loadedmetadata", handleVideoMetadata);
+      videoEl.addEventListener("loadeddata", handleVideoReady);
+
+      if (videoEl.readyState >= 1) {
+        handleVideoMetadata();
+      }
+
+      if (videoEl.readyState >= 2) {
+        handleVideoReady();
+      }
+
+      window.addEventListener("resize", handleResize, { passive: true });
+      buildTimeline();
+      startVideoLoadingWhenNearViewport();
+
+      return () => {
+        disposed = true;
+        sequenceReadyRef.current = false;
+        setIsSequenceReady(false);
+
+        if (resizeTimeoutId !== null) {
+          window.clearTimeout(resizeTimeoutId);
+        }
+
+        stopVideoSyncLoop();
+        loadingObserver?.disconnect();
+        videoEl.removeEventListener("loadedmetadata", handleVideoMetadata);
+        videoEl.removeEventListener("loadeddata", handleVideoReady);
+        window.removeEventListener("resize", handleResize);
+        gsapContext?.revert();
+      };
+    }
 
     const loadedFrames = new Array<boolean>(sequenceFrameCount).fill(false);
     const requestedFrames = new Array<boolean>(sequenceFrameCount).fill(false);
@@ -291,7 +516,7 @@ export default function CinematicJourneySection({
     const processLoadQueue = () => {
       while (!disposed && activeLoads < MAX_CONCURRENT_LOADS) {
         const frameIndex = consumeQueuedFrame();
-        const fetchPriority: "high" | "low" = "high";
+        const fetchPriority: "high" | "low" = frameIndex <= 1 ? "high" : "low";
 
         if (frameIndex === undefined) {
           return;
@@ -352,7 +577,7 @@ export default function CinematicJourneySection({
           processLoadQueue();
         };
 
-        image.src = getFrameSource(sequenceBasePath, frameIndex);
+        image.src = getFrameSource(resolvedSequenceBasePath, frameIndex);
         images[frameIndex] = image;
       }
     };
@@ -450,8 +675,6 @@ export default function CinematicJourneySection({
           .to(phaseEls[1], { autoAlpha: 0, y: -16, duration: 0.12, ease: "power2.out" }, 0.74)
           .to(phaseEls[2], { autoAlpha: 1, y: 0, duration: 0.16, ease: "power2.out" }, 0.81);
       }, sectionEl);
-
-      ScrollTrigger.refresh();
     };
 
     const handleResize = () => {
@@ -515,7 +738,14 @@ export default function CinematicJourneySection({
       window.removeEventListener("resize", handleResize);
       gsapContext?.revert();
     };
-  }, [prefersReducedMotion, scrollDistanceDesktop, scrollDistanceMobile, sequenceBasePath, sequenceFrameCount]);
+  }, [
+    prefersReducedMotion,
+    resolvedSequenceBasePath,
+    scrollDistanceDesktop,
+    scrollDistanceMobile,
+    sequenceFrameCount,
+    useVideoMedia,
+  ]);
 
   return (
     <section
@@ -525,8 +755,29 @@ export default function CinematicJourneySection({
     >
       <div ref={pinRef} className={`${styles.pin} ${prefersReducedMotion ? styles.pinStatic : ""}`}>
         <div className={`${styles.visualStack} ${isSequenceReady ? styles.visualEnhanced : ""}`}>
-          <img className={styles.posterMedia} src={posterSrc} alt="" aria-hidden="true" />
-          <canvas ref={canvasRef} className={styles.mediaCanvas} aria-hidden="true" />
+          <img
+            className={styles.posterMedia}
+            src={resolvedPosterSrc}
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
+          />
+          <video
+            ref={videoRef}
+            className={`${styles.mediaVideo} ${useVideoMedia && isSequenceReady ? styles.mediaVideoVisible : ""}`}
+            src={useVideoMedia ? DEFAULT_DESKTOP_VIDEO_SRC : undefined}
+            muted
+            playsInline
+            preload="metadata"
+            aria-hidden="true"
+          />
+          <canvas
+            ref={canvasRef}
+            className={`${styles.mediaCanvas} ${useVideoMedia ? styles.mediaCanvasHidden : ""}`}
+            aria-hidden="true"
+          />
         </div>
 
         <div className={styles.overlay} aria-hidden="true" />

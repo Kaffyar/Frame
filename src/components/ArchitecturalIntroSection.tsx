@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { clamp, isMobileLikeViewport } from "@/lib/mediaPlayback";
+import { clamp, isMobileLikeViewport, shouldUseLiteMedia } from "@/lib/mediaPlayback";
 import usePrefersReducedMotion from "@/hooks/usePrefersReducedMotion";
 import styles from "./ArchitecturalIntroSection.module.css";
 
@@ -20,8 +20,11 @@ interface ArchitecturalIntroSectionProps {
 }
 
 const LUX_POSTER_SRC = "/videos/luxury-black-house-poster-premium.jpg";
+const LUX_MOBILE_POSTER_SRC = "/videos/luxury-black-house-poster-mobile.webp";
+const LUX_DESKTOP_VIDEO_SRC = "/videos/luxury-black-house-sequence-desktop.mp4";
 const LUX_SEQUENCE_FRAME_COUNT = 477;
 const LUX_SEQUENCE_BASE_PATH = "/videos/luxury-black-house-sequence-60fps-v2";
+const LUX_SEQUENCE_MOBILE_BASE_PATH = "/videos/luxury-black-house-sequence-60fps-mobile";
 const MOBILE_BREAKPOINT = 767;
 const DESKTOP_SCROLL_DISTANCE = 4000;
 const MOBILE_SCROLL_DISTANCE = 2600;
@@ -29,14 +32,16 @@ const DESKTOP_SCRUB_AMOUNT = 1.08;
 const MOBILE_SCRUB_AMOUNT = 1.24;
 const DESKTOP_FRAME_LERP = 0.16;
 const MOBILE_FRAME_LERP = 0.22;
-const INITIAL_HIGH_PRIORITY_FRAMES = 28;
-const PRIORITY_NEIGHBORHOOD_RADIUS = 18;
-const MAX_CONCURRENT_LOADS = 4;
+const DESKTOP_VIDEO_TIME_LERP = 0.28;
+const VIDEO_TIME_EPSILON = 1 / 240;
+const INITIAL_HIGH_PRIORITY_FRAMES = 6;
+const PRIORITY_NEIGHBORHOOD_RADIUS = 4;
+const MAX_CONCURRENT_LOADS = 3;
 
 gsap.registerPlugin(ScrollTrigger);
 
-function getFrameSource(index: number): string {
-  return `${LUX_SEQUENCE_BASE_PATH}/frame-${String(index + 1).padStart(4, "0")}.webp`;
+function getFrameSource(basePath: string, index: number): string {
+  return `${basePath}/frame-${String(index + 1).padStart(4, "0")}.webp`;
 }
 
 function getSourceDimensions(image: CanvasImageSource, fallbackWidth: number, fallbackHeight: number) {
@@ -88,6 +93,7 @@ export default function ArchitecturalIntroSection({
   const sectionRef = useRef<HTMLElement | null>(null);
   const heroViewportRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const luxGlowRef = useRef<HTMLDivElement | null>(null);
   const heroHeadingBlockRef = useRef<HTMLDivElement | null>(null);
   const heroContentGridRef = useRef<HTMLDivElement | null>(null);
@@ -99,6 +105,9 @@ export default function ArchitecturalIntroSection({
   const lastDrawnFrameRef = useRef(-1);
   const sequenceReadyRef = useRef(false);
   const prefersReducedMotion = usePrefersReducedMotion();
+  const useLiteMedia = shouldUseLiteMedia(MOBILE_BREAKPOINT);
+  const useVideoMedia = !useLiteMedia && !prefersReducedMotion;
+  const posterSrc = useLiteMedia ? LUX_MOBILE_POSTER_SRC : LUX_POSTER_SRC;
   const [isSequenceReady, setIsSequenceReady] = useState(false);
   const manifestoSentence = `${manifesto.split(". ")[0]?.replace(/\.$/, "")}.`;
 
@@ -106,6 +115,7 @@ export default function ArchitecturalIntroSection({
     const sectionEl = sectionRef.current;
     const heroViewportEl = heroViewportRef.current;
     const canvasEl = canvasRef.current;
+    const videoEl = videoRef.current;
     const luxGlowEl = luxGlowRef.current;
     const heroHeadingBlockEl = heroHeadingBlockRef.current;
     const heroContentGridEl = heroContentGridRef.current;
@@ -137,6 +147,187 @@ export default function ArchitecturalIntroSection({
     let resizeTimeoutId: number | null = null;
     let activeLoads = 0;
     let frameLerpFactor = DESKTOP_FRAME_LERP;
+    const sequenceBasePath = useLiteMedia ? LUX_SEQUENCE_MOBILE_BASE_PATH : LUX_SEQUENCE_BASE_PATH;
+
+    if (useVideoMedia) {
+      if (!videoEl) {
+        return;
+      }
+
+      let videoDuration = LUX_SEQUENCE_FRAME_COUNT / 60;
+      let lastProgress = 0;
+      let targetVideoTime = 0;
+      let renderedVideoTime = 0;
+      let videoSyncRafId: number | null = null;
+
+      const stopVideoSyncLoop = () => {
+        if (videoSyncRafId !== null) {
+          window.cancelAnimationFrame(videoSyncRafId);
+          videoSyncRafId = null;
+        }
+      };
+
+      const setVideoCurrentTime = (time: number, force = false) => {
+        if (videoEl.readyState < 1) {
+          return;
+        }
+
+        if (!force && Math.abs(videoEl.currentTime - time) < VIDEO_TIME_EPSILON) {
+          return;
+        }
+
+        try {
+          videoEl.currentTime = time;
+        } catch {
+          // Ignore seek errors while metadata is still settling.
+        }
+      };
+
+      const tickVideoSync = () => {
+        videoSyncRafId = window.requestAnimationFrame(() => {
+          const delta = targetVideoTime - renderedVideoTime;
+
+          if (Math.abs(delta) <= VIDEO_TIME_EPSILON) {
+            renderedVideoTime = targetVideoTime;
+          } else {
+            renderedVideoTime += delta * DESKTOP_VIDEO_TIME_LERP;
+          }
+
+          setVideoCurrentTime(renderedVideoTime);
+
+          if (Math.abs(targetVideoTime - renderedVideoTime) > VIDEO_TIME_EPSILON) {
+            tickVideoSync();
+            return;
+          }
+
+          videoSyncRafId = null;
+          renderedVideoTime = targetVideoTime;
+          setVideoCurrentTime(renderedVideoTime, true);
+        });
+      };
+
+      const syncVideoTime = (progress: number, force = false) => {
+        const maxTime = Math.max(0, videoDuration - 1 / 60);
+        targetVideoTime = clamp(progress * videoDuration, 0, maxTime);
+
+        if (force || !sequenceReadyRef.current) {
+          stopVideoSyncLoop();
+          renderedVideoTime = targetVideoTime;
+          setVideoCurrentTime(renderedVideoTime, true);
+          return;
+        }
+
+        if (videoSyncRafId === null) {
+          tickVideoSync();
+        }
+      };
+
+      const handleVideoMetadata = () => {
+        videoDuration = videoEl.duration || videoDuration;
+        renderedVideoTime = clamp(videoEl.currentTime || 0, 0, Math.max(0, videoDuration - 1 / 60));
+        syncVideoTime(lastProgress, true);
+      };
+
+      const handleVideoReady = () => {
+        if (disposed) {
+          return;
+        }
+
+        sequenceReadyRef.current = true;
+        setIsSequenceReady(true);
+        syncVideoTime(lastProgress, true);
+      };
+
+      const buildTimeline = () => {
+        gsapContext?.revert();
+
+        gsapContext = gsap.context(() => {
+          gsap.set(luxGlowEl, { opacity: prefersReducedMotion ? 1 : 0.18 });
+          gsap.set(scrollPromptEl, { opacity: prefersReducedMotion ? 0 : 1 });
+          gsap.set([heroHeadingBlockEl, heroContentGridEl, metricRowEl], { y: 0, opacity: 1 });
+
+          if (prefersReducedMotion) {
+            return;
+          }
+
+          const scrollDistance = DESKTOP_SCROLL_DISTANCE;
+          const scrubAmount = DESKTOP_SCRUB_AMOUNT;
+
+          gsap
+            .timeline({
+              defaults: { ease: "none" },
+              scrollTrigger: {
+                trigger: sectionEl,
+                start: "top top",
+                end: () => `+=${scrollDistance}`,
+                pin: heroViewportEl,
+                pinSpacing: true,
+                scrub: scrubAmount,
+                anticipatePin: 1,
+                fastScrollEnd: true,
+                invalidateOnRefresh: true,
+                onUpdate: (self) => {
+                  lastProgress = self.progress;
+                  syncVideoTime(lastProgress);
+                },
+                onRefresh: (self) => {
+                  lastProgress = self.progress;
+                  syncVideoTime(lastProgress, true);
+                },
+              },
+            })
+            .to(scrollPromptEl, { opacity: 0, duration: 0.18 }, 0.05)
+            .fromTo(luxGlowEl, { opacity: 0.18 }, { opacity: 0.42, duration: 1 }, 0)
+            .fromTo(heroHeadingBlockEl, { y: 0, opacity: 1 }, { y: -8, opacity: 0.98, duration: 1 }, 0)
+            .fromTo(heroContentGridEl, { y: 0, opacity: 1 }, { y: -6, opacity: 0.97, duration: 1 }, 0)
+            .fromTo(metricRowEl, { y: 0, opacity: 1 }, { y: -3, opacity: 0.99, duration: 1 }, 0);
+        }, sectionEl);
+      };
+
+      const handleResize = () => {
+        if (resizeTimeoutId !== null) {
+          window.clearTimeout(resizeTimeoutId);
+        }
+
+        resizeTimeoutId = window.setTimeout(() => {
+          buildTimeline();
+          syncVideoTime(lastProgress, true);
+        }, 120);
+      };
+
+      videoEl.pause();
+      videoEl.preload = "auto";
+      videoEl.load();
+      videoEl.addEventListener("loadedmetadata", handleVideoMetadata);
+      videoEl.addEventListener("loadeddata", handleVideoReady);
+
+      if (videoEl.readyState >= 1) {
+        handleVideoMetadata();
+      }
+
+      if (videoEl.readyState >= 2) {
+        handleVideoReady();
+      }
+
+      window.addEventListener("resize", handleResize, { passive: true });
+      buildTimeline();
+
+      return () => {
+        disposed = true;
+        sequenceReadyRef.current = false;
+        setIsSequenceReady(false);
+
+        if (resizeTimeoutId !== null) {
+          window.clearTimeout(resizeTimeoutId);
+        }
+
+        stopVideoSyncLoop();
+        videoEl.removeEventListener("loadedmetadata", handleVideoMetadata);
+        videoEl.removeEventListener("loadeddata", handleVideoReady);
+        window.removeEventListener("resize", handleResize);
+        gsapContext?.revert();
+      };
+    }
 
     const loadedFrames = new Array<boolean>(LUX_SEQUENCE_FRAME_COUNT).fill(false);
     const requestedFrames = new Array<boolean>(LUX_SEQUENCE_FRAME_COUNT).fill(false);
@@ -290,7 +481,7 @@ export default function ArchitecturalIntroSection({
     const processLoadQueue = () => {
       while (!disposed && activeLoads < MAX_CONCURRENT_LOADS) {
         const frameIndex = consumeQueuedFrame();
-        const fetchPriority: "high" | "low" = "high";
+        const fetchPriority: "high" | "low" = frameIndex <= 1 ? "high" : "low";
 
         if (frameIndex === undefined) {
           return;
@@ -351,7 +542,7 @@ export default function ArchitecturalIntroSection({
           processLoadQueue();
         };
 
-        image.src = getFrameSource(frameIndex);
+        image.src = getFrameSource(sequenceBasePath, frameIndex);
         images[frameIndex] = image;
       }
     };
@@ -423,8 +614,6 @@ export default function ArchitecturalIntroSection({
           .fromTo(heroContentGridEl, { y: 0, opacity: 1 }, { y: -6, opacity: 0.97, duration: 1 }, 0)
           .fromTo(metricRowEl, { y: 0, opacity: 1 }, { y: -3, opacity: 0.99, duration: 1 }, 0);
       }, sectionEl);
-
-      ScrollTrigger.refresh();
     };
 
     const handleResize = () => {
@@ -473,7 +662,7 @@ export default function ArchitecturalIntroSection({
       window.removeEventListener("resize", handleResize);
       gsapContext?.revert();
     };
-  }, [prefersReducedMotion]);
+  }, [prefersReducedMotion, useLiteMedia, useVideoMedia]);
 
   return (
     <section
@@ -486,10 +675,25 @@ export default function ArchitecturalIntroSection({
         <div className={styles.mediaLayer} aria-hidden="true">
           <img
             className={`${styles.posterMedia} ${isSequenceReady ? styles.posterHidden : ""}`}
-            src={LUX_POSTER_SRC}
+            src={posterSrc}
             alt=""
+            decoding="async"
+            fetchPriority="high"
           />
-          <canvas ref={canvasRef} className={styles.mediaCanvas} aria-hidden="true" />
+          <video
+            ref={videoRef}
+            className={`${styles.mediaVideo} ${useVideoMedia && isSequenceReady ? styles.mediaVideoVisible : ""}`}
+            src={useVideoMedia ? LUX_DESKTOP_VIDEO_SRC : undefined}
+            muted
+            playsInline
+            preload="metadata"
+            aria-hidden="true"
+          />
+          <canvas
+            ref={canvasRef}
+            className={`${styles.mediaCanvas} ${useVideoMedia ? styles.mediaCanvasHidden : ""}`}
+            aria-hidden="true"
+          />
         </div>
 
         <div className={styles.overlay} aria-hidden="true" />

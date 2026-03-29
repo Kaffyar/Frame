@@ -29,7 +29,7 @@ const PROJECTS: Project[] = [
     area: "120 Ha",
     tags: ["Urban Planning", "Heritage", "Mixed-Use"],
     accent: "from-amber-900/35 via-amber-700/10 to-transparent",
-    imageSrc: "/videos/full-journey-scroll-poster.jpg",
+    imageSrc: "/videos/full-journey-scroll-poster-mobile.webp",
     imageAlt: "Aerial view of a district plan with towers, streets, and planted open space.",
   },
   {
@@ -41,7 +41,7 @@ const PROJECTS: Project[] = [
     area: "38,000 sqm",
     tags: ["Residential", "Biophilic", "Luxury"],
     accent: "from-emerald-900/35 via-emerald-700/10 to-transparent",
-    imageSrc: "/videos/luxury-black-house-poster-premium.jpg",
+    imageSrc: "/videos/luxury-black-house-poster-mobile.webp",
     imageAlt: "Contemporary luxury residence framed by landscape and evening light.",
   },
   {
@@ -347,6 +347,9 @@ const ProjectsSection = () => {
               <img
                 src={project.imageSrc}
                 alt={project.imageAlt}
+                loading="lazy"
+                decoding="async"
+                fetchPriority="low"
                 className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-700 group-hover:scale-[1.03]"
               />
               <div className={`absolute inset-0 bg-gradient-to-br ${project.accent}`} />

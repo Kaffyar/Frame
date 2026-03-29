@@ -68,21 +68,21 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', sans-serif;
+    font-family: "Inter", "Segoe UI", sans-serif;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: "Cormorant Garamond", Georgia, serif;
   }
 }
 
 @layer utilities {
   .font-display {
-    font-family: 'Cormorant Garamond', serif;
+    font-family: "Cormorant Garamond", Georgia, serif;
   }
 
   .font-body {
-    font-family: 'Inter', sans-serif;
+    font-family: "Inter", "Segoe UI", sans-serif;
   }
 
   .text-gold {
@@ -110,19 +110,9 @@
   }
 }
 
-/* Page fade-in */
-@keyframes pageIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 /* Smooth scrolling */
 html {
   scroll-behavior: smooth;
-}
-
-body {
-  animation: pageIn 0.8s ease-out;
 }
 
 /* Gold focus ring globally */

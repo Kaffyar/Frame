@@ -55,7 +55,8 @@
 }
 
 .posterMedia,
-.mediaCanvas {
+.mediaCanvas,
+.mediaVideo {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -78,6 +79,24 @@
   opacity: 0;
   transition: opacity 320ms ease;
   contain: paint;
+}
+
+.mediaCanvasHidden {
+  opacity: 0 !important;
+  visibility: hidden;
+}
+
+.mediaVideo {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 320ms ease, visibility 320ms ease;
+  object-fit: cover;
+  object-position: center center;
+}
+
+.mediaVideoVisible {
+  opacity: 1;
+  visibility: visible;
 }
 
 .visualEnhanced .mediaCanvas {
@@ -286,7 +305,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .posterMedia,
-  .mediaCanvas {
+  .mediaCanvas,
+  .mediaVideo {
     transform: none;
   }
 }
